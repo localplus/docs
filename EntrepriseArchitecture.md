@@ -34,6 +34,11 @@
 | **Multi-région** | Prévu, pas immédiat | Design pour, implémente plus tard |
 | **Database** | Aiven PostgreSQL | Managed, multicloud-ready, PCI compliant |
 | **Messaging** | Aiven Kafka | Managed, multicloud-ready |
+| **Cache** | Aiven Valkey | Redis-compatible, managed |
+| **Edge/CDN** | Cloudflare | Free tier, WAF, DDoS, global CDN, multi-cloud ready |
+| **API Gateway / APIM** | À définir (Phase future) | Options : AWS API Gateway, Gravitee, Kong — décision ultérieure |
+| **DNS Public** | Cloudflare DNS | Authoritative, DNSSEC, global anycast |
+| **DNS Interne/Backup** | AWS Route53 | Private hosted zones, health checks, failover |
 | **Observabilité** | Self-hosted, coût minimal | Prometheus/Loki/Tempo + CloudWatch Logs (tier gratuit) |
 
 ---
@@ -83,8 +88,20 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              INTERNET                                       │
+│                           (End Users)                                       │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLOUDFLARE EDGE (Global)                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  • DNS (localplus.io)          • WAF (OWASP rules)                         │
+│  • DDoS Protection (L3-L7)     • SSL/TLS Termination                       │
+│  • CDN (static assets)         • Bot Protection                            │
+│  • Cloudflare Tunnel           • Zero Trust Access                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Cloudflare Tunnel (encrypted)
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     WORKLOAD ACCOUNT (PROD) — eu-west-1                     │
@@ -336,6 +353,32 @@ platform-cache/
 │   │   └── patterns.py                  # Cache-aside, write-through
 │   └── go/
 │       └── cache/
+└── README.md
+
+platform-gateway/
+├── apisix/
+│   ├── values.yaml                      # APISIX Helm config
+│   ├── routes/
+│   │   ├── v1/                          # API v1 routes
+│   │   └── v2/                          # API v2 routes (future)
+│   ├── plugins/
+│   │   ├── jwt-config.yaml
+│   │   ├── rate-limit-config.yaml
+│   │   └── cors-config.yaml
+│   └── consumers/                       # API consumers (partners, services)
+├── cloudflare/
+│   ├── terraform/
+│   │   ├── main.tf
+│   │   ├── dns.tf
+│   │   ├── tunnel.tf
+│   │   ├── waf.tf
+│   │   └── access.tf
+│   └── policies/
+│       ├── waf-rules.yaml
+│       └── access-policies.yaml
+├── cloudflared/
+│   ├── deployment.yaml                  # Tunnel daemon
+│   └── config.yaml
 └── README.md
 
 platform-security/
@@ -600,10 +643,21 @@ ArgoCD ApplicationSets avec **Git Generator + Matrix Generator** découvrent aut
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ LAYER 1: PERIMETER                                                          │
-│ • AWS WAF on ALB (si exposé internet)                                       │
-│ • AWS Shield (DDoS)                                                         │
-│ • Cilium Gateway API (TLS termination)                                      │
+│ LAYER 0: EDGE (Cloudflare)                                                  │
+│ • Cloudflare WAF (OWASP Core Ruleset, custom rules)                        │
+│ • Cloudflare DDoS Protection (L3/L4/L7, unlimited)                         │
+│ • Bot Management (JS challenge, CAPTCHA)                                   │
+│ • TLS 1.3 termination, HSTS enforced                                       │
+│ • Cloudflare Tunnel (no public origin IP)                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: API GATEWAY (APISIX)                                               │
+│ • JWT/API Key validation                                                   │
+│ • Rate limiting (fine-grained, per user/tenant)                            │
+│ • Request validation (JSON Schema)                                         │
+│ • Circuit breaker                                                          │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -1205,6 +1259,387 @@ Retry Timeline (Exponential):
 
 ---
 
+# 🌍 **PARTIE IX.B — EDGE, CDN & CLOUDFLARE**
+
+## **9.5 Cloudflare Architecture**
+
+### **9.5.1 Pourquoi Cloudflare ?**
+
+| Critère | Cloudflare | AWS CloudFront + WAF | Verdict |
+|---------|------------|---------------------|---------|
+| **Coût** | Free tier généreux | Payant dès le début | ✅ Cloudflare |
+| **WAF** | Gratuit (règles de base) | ~30€/mois minimum | ✅ Cloudflare |
+| **DDoS** | Inclus (unlimited) | AWS Shield Standard gratuit | ≈ Égal |
+| **SSL/TLS** | Gratuit, auto-renew | ACM gratuit | ≈ Égal |
+| **CDN** | 300+ PoPs, gratuit | Payant au GB | ✅ Cloudflare |
+| **DNS** | Gratuit, très rapide | Route53 ~0.50€/zone | ✅ Cloudflare |
+| **Zero Trust** | Gratuit jusqu'à 50 users | Cognito + ALB payant | ✅ Cloudflare |
+| **Terraform** | Provider officiel | Provider officiel | ≈ Égal |
+
+> **Décision :** Cloudflare en front, AWS en backend. Best of both worlds.
+
+### **9.5.2 Architecture Edge-to-Origin**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              INTERNET                                        │
+│                           (End Users)                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLOUDFLARE EDGE                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 1: DNS                                                         │    │
+│  │ • Authoritative DNS (localplus.io)                                  │    │
+│  │ • DNSSEC enabled                                                    │    │
+│  │ • Geo-routing (future multi-region)                                 │    │
+│  │ • Health checks → automatic failover                                │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 2: DDoS Protection                                            │    │
+│  │ • Layer 3/4 DDoS mitigation (automatic, unlimited)                  │    │
+│  │ • Layer 7 DDoS mitigation                                           │    │
+│  │ • Rate limiting rules                                               │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 3: WAF (Web Application Firewall)                             │    │
+│  │ • OWASP Core Ruleset (free managed rules)                           │    │
+│  │ • Custom rules (rate limit, geo-block, bot score)                   │    │
+│  │ • Challenge pages (CAPTCHA, JS challenge)                           │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 4: SSL/TLS                                                    │    │
+│  │ • Edge certificates (auto-issued, free)                             │    │
+│  │ • Full (strict) mode → Origin certificate                           │    │
+│  │ • TLS 1.3 only, HSTS enabled                                        │    │
+│  │ • Automatic HTTPS rewrites                                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 5: CDN & Caching                                              │    │
+│  │ • Static assets caching (JS, CSS, images)                           │    │
+│  │ • API responses: Cache-Control headers                              │    │
+│  │ • Tiered caching (edge → regional → origin)                         │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ LAYER 6: Cloudflare Tunnel (Argo Tunnel)                            │    │
+│  │ • No public IP needed on origin                                     │    │
+│  │ • Encrypted tunnel to Cloudflare edge                               │    │
+│  │ • cloudflared daemon in K8s                                         │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Cloudflare Tunnel (encrypted)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         AWS EKS CLUSTER                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ cloudflared (Deployment)                                            │    │
+│  │ • Runs in platform namespace                                        │    │
+│  │ • Connects to Cloudflare edge                                       │    │
+│  │ • Routes traffic to internal services                               │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ API Gateway (APISIX) or Cilium Gateway                              │    │
+│  │ • Internal routing                                                  │    │
+│  │ • Rate limiting (L7)                                                │    │
+│  │ • Authentication                                                    │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ Application Services                                                │    │
+│  │ • svc-ledger, svc-wallet, etc.                                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **9.5.3 Cloudflare Services Configuration**
+
+| Service | Plan | Configuration | Coût |
+|---------|------|---------------|------|
+| **DNS** | Free | Authoritative, DNSSEC, proxy enabled | 0€ |
+| **CDN** | Free | Cache everything, tiered caching | 0€ |
+| **SSL/TLS** | Free | Full (strict), TLS 1.3, edge certs | 0€ |
+| **WAF** | Free | Managed ruleset, 5 custom rules | 0€ |
+| **DDoS** | Free | L3/L4/L7 protection, unlimited | 0€ |
+| **Bot Management** | Free | Basic bot score, JS challenge | 0€ |
+| **Rate Limiting** | Free | 1 rule (10K req/month free) | 0€ |
+| **Tunnel** | Free | Unlimited tunnels, cloudflared | 0€ |
+| **Access** | Free | Zero Trust, 50 users free | 0€ |
+
+**Coût Cloudflare total : 0€** (Free tier suffisant pour démarrer)
+
+### **9.5.4 DNS Configuration**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DNS RECORDS — localplus.io                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  TYPE    NAME                CONTENT                      PROXY   TTL       │
+│  ────────────────────────────────────────────────────────────────────────   │
+│  A       @                   Cloudflare Tunnel            ☁️ ON   Auto      │
+│  CNAME   www                 @                            ☁️ ON   Auto      │
+│  CNAME   api                 tunnel-xxx.cfargotunnel.com  ☁️ ON   Auto      │
+│  CNAME   grafana             tunnel-xxx.cfargotunnel.com  ☁️ ON   Auto      │
+│  CNAME   argocd              tunnel-xxx.cfargotunnel.com  ☁️ ON   Auto      │
+│  TXT     @                   "v=spf1 include:_spf..."     ☁️ OFF  Auto      │
+│  TXT     _dmarc              "v=DMARC1; p=reject..."      ☁️ OFF  Auto      │
+│  MX      @                   mail provider                ☁️ OFF  Auto      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **9.5.5 WAF Rules Strategy**
+
+| Rule Set | Type | Action | Purpose |
+|----------|------|--------|---------|
+| **OWASP Core** | Managed | Block | SQLi, XSS, LFI, RFI protection |
+| **Cloudflare Managed** | Managed | Block | Zero-day, emerging threats |
+| **Geo-Block** | Custom | Block | Block high-risk countries (optional) |
+| **Rate Limit API** | Custom | Challenge | > 100 req/min per IP on /api/* |
+| **Bot Score < 30** | Custom | Challenge | Likely bot traffic |
+| **Known Bad ASNs** | Custom | Block | Hosting providers, VPNs (optional) |
+
+### **9.5.6 SSL/TLS Configuration**
+
+| Setting | Value | Rationale |
+|---------|-------|-----------|
+| **SSL Mode** | Full (strict) | Origin has valid cert |
+| **Minimum TLS** | 1.2 | PCI-DSS compliance |
+| **TLS 1.3** | Enabled | Performance + security |
+| **HSTS** | Enabled (max-age=31536000) | Force HTTPS |
+| **Always Use HTTPS** | On | Redirect HTTP → HTTPS |
+| **Automatic HTTPS Rewrites** | On | Fix mixed content |
+| **Origin Certificate** | Cloudflare Origin CA | 15-year validity, free |
+
+### **9.5.7 Cloudflare Tunnel Architecture**
+
+| Composant | Rôle | Déploiement |
+|-----------|------|-------------|
+| **cloudflared daemon** | Agent tunnel, connexion sécurisée vers Cloudflare | 2+ replicas, namespace platform |
+| **Tunnel credentials** | Secret d'authentification tunnel | Vault / External-Secrets |
+| **Tunnel config** | Routing rules vers services internes | ConfigMap |
+| **Health checks** | Vérification disponibilité tunnel | Cloudflare dashboard |
+
+**Avantages Cloudflare Tunnel :**
+- Pas d'IP publique exposée sur l'origin
+- Connexion outbound uniquement (pas de firewall inbound)
+- Encryption de bout en bout
+- Failover automatique entre replicas
+
+### **9.5.8 Cloudflare Access (Zero Trust)**
+
+| Resource | Policy | Authentication |
+|----------|--------|----------------|
+| **grafana.localplus.io** | Team only | GitHub SSO |
+| **argocd.localplus.io** | Team only | GitHub SSO |
+| **api.localplus.io/admin** | Admin only | GitHub SSO + MFA |
+| **api.localplus.io/*** | Public | No auth (application handles) |
+
+### **9.5.9 Infrastructure as Code (Terraform)**
+
+| Ressource Terraform | Description | Module/Provider |
+|---------------------|-------------|-----------------|
+| **cloudflare_zone** | Zone DNS principale | cloudflare/cloudflare |
+| **cloudflare_record** | Records DNS (A, CNAME, TXT) | cloudflare/cloudflare |
+| **cloudflare_tunnel** | Configuration tunnel | cloudflare/cloudflare |
+| **cloudflare_ruleset** | WAF rules, rate limiting | cloudflare/cloudflare |
+| **cloudflare_access_application** | Zero Trust apps | cloudflare/cloudflare |
+| **cloudflare_access_policy** | Policies d'accès | cloudflare/cloudflare |
+
+> **Note :** Toute la configuration Cloudflare est gérée via Terraform dans le repo `platform-gateway/cloudflare/terraform/`
+
+### **9.5.10 Cloudflare Monitoring & Analytics**
+
+| Metric | Source | Dashboard |
+|--------|--------|-----------|
+| **Requests** | Cloudflare Analytics | Grafana (API) |
+| **Cache Hit Ratio** | Cloudflare Analytics | Grafana |
+| **WAF Events** | Cloudflare Security Events | Grafana + Alerts |
+| **Bot Score Distribution** | Cloudflare Analytics | Grafana |
+| **Origin Response Time** | Cloudflare Analytics | Grafana |
+| **DDoS Attacks** | Cloudflare Security Center | Email alerts |
+
+### **9.5.11 Route53 — DNS Interne & Backup**
+
+| Use Case | Solution | Configuration |
+|----------|----------|---------------|
+| **DNS Public (Primary)** | Cloudflare | Authoritative pour `localplus.io` |
+| **DNS Public (Backup)** | Route53 | Secondary zone, sync via AXFR |
+| **DNS Privé (Internal)** | Route53 Private Hosted Zones | `*.internal.localplus.io` |
+| **Service Discovery** | Route53 + Cloud Map | Résolution services internes |
+| **Health Checks** | Route53 Health Checks | Failover automatique si Cloudflare down |
+
+**Architecture DNS Hybride :**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DNS ARCHITECTURE                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  EXTERNAL TRAFFIC                          INTERNAL TRAFFIC                  │
+│  ─────────────────                         ─────────────────                 │
+│                                                                              │
+│  ┌─────────────────┐                       ┌─────────────────┐              │
+│  │ Cloudflare DNS  │                       │ Route53 Private │              │
+│  │  (Primary)      │                       │ Hosted Zone     │              │
+│  │                 │                       │                 │              │
+│  │ localplus.io    │                       │ internal.       │              │
+│  │ api.localplus.io│                       │ localplus.io    │              │
+│  └────────┬────────┘                       └────────┬────────┘              │
+│           │                                         │                        │
+│           │ Failover                                │ VPC DNS                │
+│           ▼                                         ▼                        │
+│  ┌─────────────────┐                       ┌─────────────────┐              │
+│  │ Route53 Public  │                       │ EKS CoreDNS     │              │
+│  │  (Backup)       │                       │ + Cloud Map     │              │
+│  │                 │                       │                 │              │
+│  │ Health checks   │                       │ svc-*.svc.      │              │
+│  │ Failover ready  │                       │ cluster.local   │              │
+│  └─────────────────┘                       └─────────────────┘              │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Route53 Feature | Use Case Local-Plus |
+|-----------------|---------------------|
+| **Private Hosted Zones** | Résolution DNS interne VPC, pas d'exposition internet |
+| **Health Checks** | Vérification santé endpoints, failover automatique |
+| **Alias Records** | Pointage vers ALB/NLB sans IP hardcodée |
+| **Geolocation Routing** | Future multi-région, routage par géographie |
+| **Failover Routing** | Backup si Cloudflare indisponible |
+| **Weighted Routing** | Canary deployments, A/B testing |
+
+### **9.5.12 Vision Multi-Cloud**
+
+> **Objectif :** L'architecture edge (Cloudflare) et API Gateway (APISIX) sont **cloud-agnostic** et peuvent router vers plusieurs cloud providers.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MULTI-CLOUD ARCHITECTURE (Future)                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│                         CLOUDFLARE EDGE                                      │
+│                    (Global Load Balancing)                                   │
+│                              │                                               │
+│              ┌───────────────┼───────────────┐                              │
+│              │               │               │                              │
+│              ▼               ▼               ▼                              │
+│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐                   │
+│  │  AWS (Primary)│  │  GCP (Future) │  │ Azure (Future)│                   │
+│  │  eu-west-1    │  │  europe-west1 │  │ westeurope    │                   │
+│  │               │  │               │  │               │                   │
+│  │  ┌─────────┐  │  │  ┌─────────┐  │  │  ┌─────────┐  │                   │
+│  │  │ APISIX  │  │  │  │ APISIX  │  │  │  │ APISIX  │  │                   │
+│  │  │ Gateway │  │  │  │ Gateway │  │  │  │ Gateway │  │                   │
+│  │  └────┬────┘  │  │  └────┬────┘  │  │  └────┬────┘  │                   │
+│  │       │       │  │       │       │  │       │       │                   │
+│  │  ┌────┴────┐  │  │  ┌────┴────┐  │  │  ┌────┴────┐  │                   │
+│  │  │Services │  │  │  │Services │  │  │  │Services │  │                   │
+│  │  └─────────┘  │  │  └─────────┘  │  │  └─────────┘  │                   │
+│  └───────────────┘  └───────────────┘  └───────────────┘                   │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    AIVEN (Multi-Cloud Data Layer)                   │    │
+│  │  • PostgreSQL avec réplication cross-cloud                         │    │
+│  │  • Kafka avec MirrorMaker cross-cloud                              │    │
+│  │  • Valkey avec réplication                                         │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Composant | Multi-Cloud Ready | Comment |
+|-----------|-------------------|---------|
+| **Cloudflare** | ✅ Oui | Load balancing global, health checks multi-origin |
+| **APISIX** | ✅ Oui | Déployable sur tout K8s (EKS, GKE, AKS) |
+| **Aiven** | ✅ Oui | PostgreSQL, Kafka, Valkey disponibles sur AWS/GCP/Azure |
+| **ArgoCD** | ✅ Oui | Peut gérer des clusters multi-cloud |
+| **Vault** | ✅ Oui | Réplication cross-datacenter |
+| **OTel** | ✅ Oui | Standard ouvert, backends interchangeables |
+
+**Phases Multi-Cloud :**
+
+| Phase | Scope | Timeline |
+|-------|-------|----------|
+| **Phase 1 (Actuelle)** | AWS uniquement, architecture cloud-agnostic | Now |
+| **Phase 2** | DR sur GCP (read replicas, failover) | +12 mois |
+| **Phase 3** | Active-Active multi-cloud | +24 mois |
+
+---
+
+# 🚪 **PARTIE IX.C — API GATEWAY / APIM (Phase Future)**
+
+> **Statut :** À définir ultérieurement. Pour le moment, l'architecture reste simple : Cloudflare → Cilium Gateway → Services.
+
+## **9.6 Options à évaluer (Future)**
+
+| Solution | Type | Coût | Notes |
+|----------|------|------|-------|
+| **AWS API Gateway** | Managed | Pay-per-use | Simple, intégré AWS |
+| **Gravitee CE** | APIM complet | Gratuit | Portal, Subscriptions inclus |
+| **Kong OSS** | Gateway | Gratuit | Populaire, plugins riches |
+| **APISIX** | Gateway | Gratuit | Cloud-native, performant |
+
+**Décision reportée à Phase 2+ selon les besoins :**
+- Si besoin B2B/Partners → APIM (Gravitee)
+- Si juste rate limiting/auth → AWS API Gateway
+- Si multi-cloud requis → APISIX ou Kong
+
+### **Architecture Actuelle (Phase 1 — Simple)**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ARCHITECTURE SIMPLIFIÉE — PHASE 1                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Internet                                                                    │
+│       │                                                                      │
+│       ▼                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ CLOUDFLARE                                                           │    │
+│  │ (DNS, WAF, DDoS, TLS)                                               │    │
+│  └──────────────────────────────┬──────────────────────────────────────┘    │
+│                                 │                                            │
+│                                 │ Tunnel ou Direct                           │
+│                                 ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │ AWS EKS — Cilium Gateway API                                         │    │
+│  │ (Routing interne, mTLS)                                              │    │
+│  │                                                                      │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │    │
+│  │  │ Services : svc-ledger, svc-wallet, svc-merchant, ...        │    │    │
+│  │  └─────────────────────────────────────────────────────────────┘    │    │
+│  │                                                                      │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+│  Pas d'API Gateway dédié pour le moment — Cilium Gateway API suffit.       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 # ⚡ **PARTIE X — RESILIENCE & DR**
 
 ## **10.1 Failure Modes**
@@ -1311,6 +1746,24 @@ Retry Timeline (Exponential):
 | **Priority Queue** | critical > high > default > low |
 | **CronJob** | K8s scheduled tasks (batch, cleanup) |
 | **Rate Limiting** | Valkey sliding window counter |
+| **Edge Computing** | Cloudflare Workers, CDN edge nodes |
+| **WAF (Web Application Firewall)** | Cloudflare WAF, OWASP ruleset |
+| **DDoS Protection** | Cloudflare L3/L4/L7 mitigation |
+| **CDN (Content Delivery Network)** | Cloudflare CDN, static asset caching |
+| **TLS Termination** | Cloudflare edge → Origin mTLS |
+| **Zero Trust** | Cloudflare Access, GitHub SSO |
+| **Cloudflare Tunnel** | Secure tunnel, no public origin IP |
+| **API Gateway / APIM** | À définir — Phase future (AWS API Gateway, Gravitee, Kong) |
+| **Bot Score** | Cloudflare bot detection metric |
+| **Origin Certificate** | Cloudflare Origin CA (15-year, free) |
+| **Private Hosted Zone** | Route53 DNS interne (VPC only) |
+| **DNS Failover** | Route53 health checks + backup de Cloudflare |
+| **Multi-Cloud** | Architecture déployable sur AWS/GCP/Azure |
+| **Cloud-Agnostic** | Composants non liés à un provider spécifique |
+| **Cloudflare Tunnel** | Connexion sécurisée sans IP publique origin |
+| **Upstream** | Backend service target dans API Gateway |
+| **Consumer** | Client API avec credentials (JWT, API Key) |
+| **Global Load Balancing** | Cloudflare routing multi-origin/multi-cloud |
 
 ---
 
@@ -1321,6 +1774,7 @@ Retry Timeline (Exponential):
 | **1** | Bootstrap Layer 0-1 | IAM, VPC, EKS, Aiven setup (PG, Kafka, Valkey) | 3 semaines |
 | **2** | Platform GitOps | ArgoCD, ApplicationSets | 1 semaine |
 | **3** | Platform Networking | Cilium, Gateway API | 1 semaine |
+| **3b** | Edge & CDN | Cloudflare DNS, WAF, TLS | 1 semaine |
 | **4** | Platform Security | Vault, External-Secrets, Kyverno | 2 semaines |
 | **5** | Platform Observability | OTel, Prometheus, Loki, Tempo, Grafana | 2 semaines |
 | **5b** | Platform APM | Pyroscope, Sentry, APM Dashboards | 1 semaine |
@@ -1344,15 +1798,18 @@ Retry Timeline (Exponential):
 
 - [ ] Compte AWS créé, billing configuré
 - [ ] Compte Aiven créé
+- [ ] Compte Cloudflare créé (Free tier)
 - [ ] Organisation GitHub créée
 - [ ] Décision : HashiCorp Vault self-hosted sur EKS
-- [ ] Domaine DNS acquis
+- [ ] Domaine DNS acquis et transféré vers Cloudflare
 
 ## **Décisions architecturales validées :**
 
 - [ ] RPO 1h, RTO 15min — OK
 - [ ] AWS eu-west-1 — OK
-- [ ] Aiven pour Kafka + PostgreSQL — OK
+- [ ] Aiven pour Kafka + PostgreSQL + Valkey — OK
+- [ ] Cloudflare pour DNS + WAF + CDN — OK
+- [ ] API Gateway / APIM — À définir (Phase future)
 - [ ] Self-hosted observability — OK
 - [ ] ArgoCD centralisé — OK
 - [ ] Cilium + Gateway API — OK
