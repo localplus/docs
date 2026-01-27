@@ -38,9 +38,9 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 | Standard | Exigences clés | Documentation |
 |----------|---------------|---------------|
-| **GDPR** | Data residency EU, droit à l'oubli | → [docs/compliance/gdpr/](compliance/gdpr/) |
-| **PCI-DSS** | Pas de stockage PAN, encryption, audit | → [docs/compliance/pci-dss/](compliance/pci-dss/) |
-| **SOC2** | RBAC, monitoring, incident response | → [docs/compliance/soc2/](compliance/soc2/) |
+| **GDPR** | Data residency EU, droit à l'oubli | → [compliance/gdpr/](compliance/gdpr/) |
+| **PCI-DSS** | Pas de stockage PAN, encryption, audit | → [compliance/pci-dss/](compliance/pci-dss/) |
+| **SOC2** | RBAC, monitoring, incident response | → [compliance/soc2/](compliance/soc2/) |
 
 ## **1.4 Tech Stack Overview**
 
@@ -207,9 +207,9 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | **staging** | localplus-staging | eks-staging | Manual |
 | **prod** | localplus-prod | eks-prod | Manual + Approval |
 
-## **3.4 CI/CD**
+## **3.4 CI/CD & Bootstrap**
 
-→ **Documentation détaillée** : [docs/bootstrap/BOOTSTRAP-GUIDE.md](bootstrap/BOOTSTRAP-GUIDE.md)
+→ **Documentation détaillée** : [bootstrap/BOOTSTRAP-GUIDE.md](bootstrap/BOOTSTRAP-GUIDE.md)
 
 ---
 
@@ -239,43 +239,50 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 ## **4.3 Repository Index**
 
+> **Note** : Les repos ci-dessous sont la structure cible. Chaque repo aura son propre README.
+
 ### Tier 0 — Foundation
-| Repo | Description | README |
-|------|-------------|--------|
-| `bootstrap/` | AWS Landing Zone, Control Tower, Account Factory | → [bootstrap/README.md](../bootstrap/README.md) |
+
+| Repo | Description |
+|------|-------------|
+| `bootstrap/` | AWS Landing Zone, Control Tower, Account Factory |
 
 ### Tier 1 — Platform
-| Repo | Description | README |
-|------|-------------|--------|
-| `platform-gitops/` | ArgoCD, ApplicationSets | → [platform-gitops/README.md](../platform-gitops/README.md) |
-| `platform-networking/` | Cilium, Gateway API | → [platform-networking/README.md](../platform-networking/README.md) |
-| `platform-observability/` | OTel, Prometheus, Loki, Tempo, Grafana | → [platform-observability/README.md](../platform-observability/README.md) |
-| `platform-security/` | Vault, External-Secrets, Kyverno | → [platform-security/README.md](../platform-security/README.md) |
-| `platform-cache/` | Valkey configuration, SDK | → [platform-cache/README.md](../platform-cache/README.md) |
-| `platform-gateway/` | APISIX (future), Cloudflare config | → [platform-gateway/README.md](../platform-gateway/README.md) |
-| `platform-application-provis/` | Terraform modules (DB, Kafka, Cache, EKS) | → [platform-application-provis/README.md](../platform-application-provis/README.md) |
+
+| Repo | Description |
+|------|-------------|
+| `platform-gitops/` | ArgoCD, ApplicationSets |
+| `platform-networking/` | Cilium, Gateway API |
+| `platform-observability/` | OTel, Prometheus, Loki, Tempo, Grafana |
+| `platform-security/` | Vault, External-Secrets, Kyverno |
+| `platform-cache/` | Valkey configuration, SDK |
+| `platform-gateway/` | APISIX (future), Cloudflare config |
+| `platform-application-provis/` | Terraform modules (DB, Kafka, Cache, EKS) |
 
 ### Tier 2 — Contracts
-| Repo | Description | README |
-|------|-------------|--------|
-| `contracts-proto/` | Protobuf definitions | → [contracts-proto/README.md](../contracts-proto/README.md) |
-| `sdk-python/` | Python SDK (clients, telemetry) | → [sdk-python/README.md](../sdk-python/README.md) |
-| `sdk-go/` | Go SDK | → [sdk-go/README.md](../sdk-go/README.md) |
+
+| Repo | Description |
+|------|-------------|
+| `contracts-proto/` | Protobuf definitions |
+| `sdk-python/` | Python SDK (clients, telemetry) |
+| `sdk-go/` | Go SDK |
 
 ### Tier 3 — Domain Services
-| Repo | Description | README |
-|------|-------------|--------|
-| `svc-ledger/` | Earn/Burn transactions | → [svc-ledger/README.md](../svc-ledger/README.md) |
-| `svc-wallet/` | Balance queries | → [svc-wallet/README.md](../svc-wallet/README.md) |
-| `svc-merchant/` | Merchant onboarding | → [svc-merchant/README.md](../svc-merchant/README.md) |
-| `svc-giftcard/` | Gift card catalog | → [svc-giftcard/README.md](../svc-giftcard/README.md) |
-| `svc-notification/` | Notifications (Kafka consumer) | → [svc-notification/README.md](../svc-notification/README.md) |
+
+| Repo | Description |
+|------|-------------|
+| `svc-ledger/` | Earn/Burn transactions |
+| `svc-wallet/` | Balance queries |
+| `svc-merchant/` | Merchant onboarding |
+| `svc-giftcard/` | Gift card catalog |
+| `svc-notification/` | Notifications (Kafka consumer) |
 
 ### Tier 4 — Quality
-| Repo | Description | README |
-|------|-------------|--------|
-| `e2e-scenarios/` | Playwright E2E tests | → [e2e-scenarios/README.md](../e2e-scenarios/README.md) |
-| `chaos-experiments/` | Litmus chaos tests | → [chaos-experiments/README.md](../chaos-experiments/README.md) |
+
+| Repo | Description |
+|------|-------------|
+| `e2e-scenarios/` | Playwright E2E tests |
+| `chaos-experiments/` | Chaos Mesh experiments |
 
 ---
 
@@ -288,25 +295,25 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | Layer | Composant | Protection |
 |-------|-----------|------------|
 | **Edge** | Cloudflare | WAF, DDoS, Bot protection |
-| **Gateway** | APISIX (future) | JWT, Rate limiting |
+| **Gateway** | Cilium Gateway API | TLS, routing |
 | **Network** | Cilium | NetworkPolicies, default deny |
 | **Identity** | IRSA + Vault | Dynamic secrets, mTLS |
 | **Workload** | Kyverno | Pod security, image signing |
 | **Data** | KMS + Aiven | Encryption at rest/transit |
 
-→ **Documentation détaillée** : [docs/security/SECURITY-ARCHITECTURE.md](security/SECURITY-ARCHITECTURE.md)
+→ **Documentation détaillée** : [security/SECURITY-ARCHITECTURE.md](security/SECURITY-ARCHITECTURE.md)
 
 ## **5.2 Observability Baseline**
 
 | Signal | Outil | Retention | Coût |
 |--------|-------|-----------|------|
-| **Metrics** | Prometheus + Thanos | 15j local, 1an S3 | ~5€/mois |
+| **Metrics** | Prometheus + Remote Write S3 | 15j local, 1an S3 | ~5€/mois |
 | **Logs** | Loki | 30 jours (GDPR) | Self-hosted |
 | **Traces** | Tempo | 7 jours | Self-hosted |
 | **Profiling** | Pyroscope | 7 jours | Self-hosted |
 | **Errors** | Sentry (self-hosted) | 30 jours | Self-hosted |
 
-→ **Documentation détaillée** : [docs/observability/OBSERVABILITY-GUIDE.md](observability/OBSERVABILITY-GUIDE.md)
+→ **Documentation détaillée** : [observability/OBSERVABILITY-GUIDE.md](observability/OBSERVABILITY-GUIDE.md)
 
 ## **5.3 Networking Baseline**
 
@@ -317,7 +324,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | **VPC Peering** | Aiven connectivity | Private, no internet |
 | **Route53** | Private DNS, backup | Internal zones |
 
-→ **Documentation détaillée** : [docs/networking/NETWORKING-ARCHITECTURE.md](networking/NETWORKING-ARCHITECTURE.md)
+→ **Documentation détaillée** : [networking/NETWORKING-ARCHITECTURE.md](networking/NETWORKING-ARCHITECTURE.md)
 
 ## **5.4 Data Baseline**
 
@@ -329,13 +336,41 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 **Règle d'or** : 1 table = 1 owner. Cross-service = gRPC ou Events, jamais JOIN.
 
-→ **Documentation détaillée** : [docs/data/DATA-ARCHITECTURE.md](data/DATA-ARCHITECTURE.md)
+→ **Documentation détaillée** : [data/DATA-ARCHITECTURE.md](data/DATA-ARCHITECTURE.md)
 
 ---
 
-# ⚡ **PARTIE VI — RESILIENCE & DR**
+# 🧪 **PARTIE VI — TESTING & QUALITY**
 
-## **6.1 Failure Modes**
+## **6.1 Test Pyramid**
+
+| Layer | Types de tests | Fréquence |
+|-------|----------------|-----------|
+| **Base** | Static analysis, Linting | Pre-commit |
+| **Unit** | Domain logic, Use cases | PR |
+| **Integration** | DB, Kafka, Cache (Testcontainers) | PR |
+| **Contract** | API contracts (Pact, gRPC) | PR |
+| **E2E** | Critical paths (Playwright) | Nightly |
+| **Performance** | Load, Stress, Soak (k6) | Nightly/Weekly |
+| **Chaos** | Failure injection (Chaos Mesh) | Weekly |
+
+## **6.2 Performance Targets**
+
+| Métrique | Target | Alerte |
+|----------|--------|--------|
+| **Latency P50** | < 50ms | > 100ms |
+| **Latency P95** | < 100ms | > 200ms |
+| **Latency P99** | < 200ms | > 500ms |
+| **Error Rate** | < 0.1% | > 1% |
+| **Throughput** | > 500 TPS | < 400 TPS |
+
+→ **Documentation détaillée** : [testing/TESTING-STRATEGY.md](testing/TESTING-STRATEGY.md)
+
+---
+
+# ⚡ **PARTIE VII — RESILIENCE & DR**
+
+## **7.1 Failure Modes**
 
 | Failure | Detection | Recovery | RTO |
 |---------|-----------|----------|-----|
@@ -346,7 +381,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | Kafka broker failure | Aiven health | Automatic rebalance | < 2min |
 | Full region failure | Manual | DR procedure | 4h (target) |
 
-## **6.2 Backup Strategy**
+## **7.2 Backup Strategy**
 
 | Data | Method | Frequency | Retention |
 |------|--------|-----------|-----------|
@@ -355,13 +390,13 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | Kafka | Topic retention | N/A | 7 jours |
 | Terraform state | S3 versioning | Every apply | 90 jours |
 
-→ **Documentation détaillée** : [docs/resilience/DR-GUIDE.md](resilience/DR-GUIDE.md)
+→ **Documentation détaillée** : [resilience/DR-GUIDE.md](resilience/DR-GUIDE.md)
 
 ---
 
-# 🛠️ **PARTIE VII — PLATFORM CONTRACTS**
+# 🛠️ **PARTIE VIII — PLATFORM CONTRACTS**
 
-## **7.1 Golden Path (New Service Checklist)**
+## **8.1 Golden Path (New Service Checklist)**
 
 | Étape | Action | Validation |
 |-------|--------|------------|
@@ -374,7 +409,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | 7 | Créer HTTPRoute | Trafic routable |
 | 8 | PR review | Merge → Auto-deploy dev |
 
-## **7.2 SLI/SLO/Error Budgets**
+## **8.2 SLI/SLO/Error Budgets**
 
 | Service | SLI | SLO | Error Budget |
 |---------|-----|-----|--------------|
@@ -383,7 +418,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | **svc-wallet** | Availability | 99.9% | 43 min/mois |
 | **Platform** | Availability | 99.5% | 3.6h/mois |
 
-## **7.3 On-Call Structure**
+## **8.3 On-Call Structure**
 
 | Rôle | Responsabilité | Rotation |
 |------|---------------|----------|
@@ -391,13 +426,13 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | **Secondary** | Escalation, expertise | Weekly |
 | **Incident Commander** | Coordination si P1 | On-demand |
 
-→ **Documentation détaillée** : [docs/platform/PLATFORM-ENGINEERING.md](platform/PLATFORM-ENGINEERING.md)
+→ **Documentation détaillée** : [platform/PLATFORM-ENGINEERING.md](platform/PLATFORM-ENGINEERING.md)
 
 ---
 
-# 🚀 **PARTIE VIII — ROADMAP**
+# 🚀 **PARTIE IX — ROADMAP**
 
-## **8.1 Séquence de Construction**
+## **9.1 Séquence de Construction**
 
 | Phase | Focus | Estimation |
 |-------|-------|------------|
@@ -420,7 +455,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 **Total estimé : ~25 semaines**
 
-## **8.2 Checklist avant démarrage**
+## **9.2 Checklist avant démarrage**
 
 ### Comptes & Accès
 - [ ] Compte AWS créé, billing configuré
@@ -446,7 +481,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 ## **A. Glossaire**
 
-→ [docs/GLOSSARY.md](GLOSSARY.md)
+→ [GLOSSARY.md](GLOSSARY.md)
 
 ## **B. ADR Index**
 
@@ -457,7 +492,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 | 003 | Cilium over Calico | Accepted |
 | ... | ... | ... |
 
-→ [docs/adr/](adr/)
+→ [adr/](adr/)
 
 ## **C. Change Management Process**
 
@@ -482,15 +517,15 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 | Document | Description | Path |
 |----------|-------------|------|
-| **Bootstrap Guide** | AWS setup, Account Factory | → [bootstrap/BOOTSTRAP-GUIDE.md](bootstrap/BOOTSTRAP-GUIDE.md) |
-| **Security Architecture** | Defense in depth, policies | → [security/SECURITY-ARCHITECTURE.md](security/SECURITY-ARCHITECTURE.md) |
-| **Observability Guide** | Metrics, logs, traces, APM | → [observability/OBSERVABILITY-GUIDE.md](observability/OBSERVABILITY-GUIDE.md) |
-| **Networking Architecture** | VPC, Cloudflare, Gateway API | → [networking/NETWORKING-ARCHITECTURE.md](networking/NETWORKING-ARCHITECTURE.md) |
-| **Data Architecture** | PostgreSQL, Kafka, Cache, Queues | → [data/DATA-ARCHITECTURE.md](data/DATA-ARCHITECTURE.md) |
-| **Testing Strategy** | Unit, Integration, E2E, Chaos | → [testing/TESTING-STRATEGY.md](testing/TESTING-STRATEGY.md) |
-| **Platform Engineering** | Contracts, Golden Path, On-Call | → [platform/PLATFORM-ENGINEERING.md](platform/PLATFORM-ENGINEERING.md) |
-| **DR Guide** | Backup, Recovery, Runbooks | → [resilience/DR-GUIDE.md](resilience/DR-GUIDE.md) |
-| **Glossary** | Terminologie | → [GLOSSARY.md](GLOSSARY.md) |
+| **Bootstrap Guide** | AWS setup, Account Factory | [bootstrap/BOOTSTRAP-GUIDE.md](bootstrap/BOOTSTRAP-GUIDE.md) |
+| **Security Architecture** | Defense in depth, IAM, PAM, Vault | [security/SECURITY-ARCHITECTURE.md](security/SECURITY-ARCHITECTURE.md) |
+| **Observability Guide** | Metrics, logs, traces, APM, dashboards | [observability/OBSERVABILITY-GUIDE.md](observability/OBSERVABILITY-GUIDE.md) |
+| **Networking Architecture** | VPC, Cloudflare, Gateway API, DNS | [networking/NETWORKING-ARCHITECTURE.md](networking/NETWORKING-ARCHITECTURE.md) |
+| **Data Architecture** | PostgreSQL, Kafka, Cache, Queues | [data/DATA-ARCHITECTURE.md](data/DATA-ARCHITECTURE.md) |
+| **Testing Strategy** | Pyramide, Unit, Integration, Performance, Chaos | [testing/TESTING-STRATEGY.md](testing/TESTING-STRATEGY.md) |
+| **Platform Engineering** | Contracts, Golden Path, On-Call, CI/CD | [platform/PLATFORM-ENGINEERING.md](platform/PLATFORM-ENGINEERING.md) |
+| **DR Guide** | Backup, Recovery, Chaos Engineering | [resilience/DR-GUIDE.md](resilience/DR-GUIDE.md) |
+| **Glossary** | Terminologie complète | [GLOSSARY.md](GLOSSARY.md) |
 
 ---
 
