@@ -245,7 +245,7 @@ LOCAL-PLUS est une plateforme de gestion de cartes cadeaux et fidélité, conçu
 
 | Repo | Description |
 |------|-------------|
-| `bootstrap/` | AWS Landing Zone, Control Tower, Account Factory |
+| `bootstrap/` | AWS Landing Zone, Account Factory, SCPs, SSO |
 
 ### Tier 1 — Platform
 

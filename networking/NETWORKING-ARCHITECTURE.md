@@ -18,7 +18,7 @@
 7. [Route53 — DNS Interne & Backup](#route53--dns-interne--backup)
 8. [API Gateway / APIM (Future)](#api-gateway--apim-future)
 9. [Multi-Cloud Vision](#multi-cloud-vision)
-10. [Topologie Multi-Account (Control Tower)](#topologie-multi-account-control-tower)
+10. [Topologie Multi-Account (AWS Organizations)](#topologie-multi-account-aws-organizations)
 
 ---
 
@@ -466,18 +466,20 @@
 
 ---
 
-# 🏢 **Topologie Multi-Account (Control Tower)**
+# 🏢 **Topologie Multi-Account (AWS Organizations)**
 
 ## Architecture Actuelle — Phase 1
 
+> **Note :** Control Tower n'est pas utilisé. Nous gérons OUs, SCPs et comptes via Terraform.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     CONTROL TOWER — MULTI-ACCOUNT                            │
+│                     AWS ORGANIZATIONS — MULTI-ACCOUNT                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    MANAGEMENT ACCOUNT                               │    │
-│  │  • AWS Organizations, Control Tower, SCPs                          │    │
+│  │  • AWS Organizations, SCPs, IAM Identity Center                    │    │
 │  │  ⚠️ Pas de workloads, pas de VPC                                   │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
